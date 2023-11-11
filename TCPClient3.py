@@ -6,7 +6,14 @@
     Author: Wei Song (Tutor for COMP3331/9331)
 """
 from socket import *
+import threading
 import sys
+import select
+
+
+##################################################
+#                 SETUP CONNECTION               #
+##################################################
 
 #Server would be running on the same host as Client
 if len(sys.argv) != 3:
@@ -22,59 +29,83 @@ clientSocket = socket(AF_INET, SOCK_STREAM)
 # build connection with the server and send message to it
 clientSocket.connect(serverAddress)
 
-def send_message(message):
+
+##################################################
+#                 HELPER FUNCTIONS               #
+##################################################
+def send_request(message):
     clientSocket.sendall(message.encode())
     data = clientSocket.recv(1024)
     return data.decode()
 
-################## COLLECT USERNAME
+def split_response(response):
+    parts = response.split(";")
+    if len(parts) < 3:
+        print("Critical Server Error: Bad Response Format")
+        sys.exit(1)
+
+    command, status_code, message = parts
+    return command, status_code, message
+
+##################################################
+#                       MAIN                     #
+##################################################
+
+################## COLLECT USERNAME ##################
 print("Please Login")
 while True:
     username = input("Username: ")
-    received = send_message(f"[loginusername] {username}")
+    response = send_request(f"[loginusername] {username}")
+    _, status_code, message = split_response(response)
     
-    if received == "user found":
+    if status_code == "200":
         break
-    elif received == "user not found":
-        print("Invalid Username, please try again.")
+    elif status_code == "404":
+        print(f"{message}")
 
-# COLLECT PASSWORD``
+################## COLLECT PASSWORD ##################
 while True:
     password = input("Password: ")
-    received = send_message(f"[loginpassword] {password}")
+    response = send_request(f"[loginpassword] {password}")
+    _, status_code, message = split_response(response)
     
-    if received == "password correct":
+    if status_code == "200": # SUCCESS
         break
-    elif received == "account blocked":
-        print("Invalid Password. Your account has been blocked. Please try again later")
+    elif status_code == "401": # UNAUTHORISED
+        print(f"{message}")
+    elif status_code == "403": # FORBIDDEN
+        print(f"{message}")
         clientSocket.close()
-        sys.exit(0)
-        # NOTE maybe change this
-    elif received == "account on cooldown":
-        print("Your account is blocked due to multiple login failures. Please try again later")
-        clientSocket.close()
-        sys.exit(0)
-    elif received == "password incorrect":
-        print("Invalid Password. Please try again")
+        sys.exit(1)
+    else:
+        print(f"Critical Server Error: Bad Status Code {status_code}")
+        sys.exit(1)
 
+def process_response(response):
+    command, status_code, message = split_response(response)
+    if command == "incomingmessage":
+        print(f"{message}")
+    elif command == "msgto":
+        print(f"{message}")
+    elif command == "unknown":
+        print(f"{message}")
+    else:
+        print(f"Critical Server Error: Bad Response Command {command}")
+        sys.exit(1)
+        
+################## USE SELECT TO WATCH INPUT ##################
 print("Welcome to Tessenger!")
-print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ")
+print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
 
 while True:
-    message = input("===== Please type any message you want to send to server: =====\n")
-    received = send_message(message)
+    readables, _, _ = select.select([sys.stdin, clientSocket], [], [])
     
-    # parse the message received from server and take corresponding actions
-    if received == "":
-        print("[recv] Message from server is empty!")
-    else:
-        print("[recv] Invalid command - please enter one of the following (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout)")
-        
-    ans = input('\nDo you want to continue(y/n) :')
-    if ans == 'y':
-        continue
-    else:
-        break
-
-# close the socket
-clientSocket.close()
+    for readable in readables:
+        if readable is sys.stdin:
+            request = sys.stdin.readline()
+            clientSocket.sendall(request.encode())
+        if readable is clientSocket:
+            response = clientSocket.recv(1024).decode()
+            process_response(response)
+            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
+    
