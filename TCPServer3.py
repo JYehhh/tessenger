@@ -220,7 +220,8 @@ class ClientThread(Thread):
                 client_ip = parts[2]
                 udp_port = parts[3]
                 
-                self.process_password(password, client_ip, udp_port)       
+                self.process_password(password, client_ip, udp_port)      
+                # NOTE, push this all into process_password 
                          
             elif requestCommand == '/msgto':
                 print("[recv] New message send attempt by user: " + self.username)
@@ -245,6 +246,7 @@ class ClientThread(Thread):
             elif requestCommand == '/logout':
                 print("[recv] New logout request by user: " + self.username)
                 self.end_client_session()
+                
             else:
                 self.process_invalid_command()
     

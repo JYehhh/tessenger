@@ -11,7 +11,6 @@ import sys
 import select
 import json
 import os
-import time
 
 
 ##################################################
@@ -74,8 +73,6 @@ def close_connections():
 ##################################################
 
 ################## COLLECT USERNAME ##################
-client_username = ""
-
 print("Please Login")
 while True:
     username = input("Username: ")
@@ -83,7 +80,6 @@ while True:
     _, status_code, message, _ = split_response(response)
     
     if status_code == "200":
-        client_username = username
         break
     elif status_code == "404":
         print(f"{message}")
@@ -168,64 +164,35 @@ def send_peer_command(request):
             print("Error: Invalid format. Usage: /p2pvideo username filename")
             return
 
+        recipient, filename = parts[1], parts[2]
+
         # Check if file exists
         if not os.path.exists(filename):
             print(f"Error: File '{filename}' does not exist.")
             return
 
-        recipient, filename = parts[1], parts[2]
-        # Check if recipient is active and get their UDP details
+        # Request active users list from the server
         response = send_and_get_response("/activeuser")
         _, _, _, active_users_data = split_response(response)
 
+        # Check if recipient is active and get their UDP details
         if recipient in active_users_data["client_ips"] and recipient in active_users_data["udp_ports"]:
             recipient_ip = active_users_data["client_ips"][recipient]
             recipient_port = int(active_users_data["udp_ports"][recipient])
         else:
             print(f"Error: Recipient '{recipient}' is not active.")
             return
-        
+
+        # Send file over UDP
         send_file_over_udp(filename, recipient_ip, recipient_port)
+        print(f"{filename} has been uploaded to {recipient}.")
 
-def send_file_over_udp(filename, audience_ip, audience_udp_port):
-    global client_username
-    global udpSocket # NOTE do i have to open a new socket to send?
-    
-    initial_packet = f"initiate_transfer {filename} {client_username}"
-    udpSocket.sendto(initial_packet.encode(), (audience_ip, audience_udp_port))
-    
+def send_file_over_udp(filename, ip, port):
     with open(filename, 'rb') as file:
-        data = file.read(1024) # Read in chunks of 1024 bytes
+        data = file.read(1024)  # Read in chunks of 1024 bytes
         while data:
-            udpSocket.sendto(data, (audience_ip, audience_udp_port))
-            time.sleep(0.00001)
+            udpSocket.sendto(data, (ip, port))
             data = file.read(1024)
-            
-    print(f"{filename} has been uploaded")
-    end_signal = b'EOF'
-    udpSocket.sendto(end_signal, (audience_ip, int(audience_udp_port)))
-    udpSocket.close()
-
-
-def listening_for_video(socket):
-    while True:
-        data, _ = socket.recvfrom(1024)
-        packet = data.decode()
-        if packet.startswith("initiate_transfer"):
-            filename = packet.split()[1]
-            username = packet.split()[2]
-            with open(f"{username}_{filename}", 'wb') as f:
-                try:
-                    while True:
-                        video_data, _ = socket.recvfrom(1024)
-                        if video_data.endswith(b'EOF'):
-                            f.write(video_data[:-len(b'EOF')])
-                            print(f"Received {filename} from {username}")
-                            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
-                            break
-                        f.write(video_data)
-                except KeyboardInterrupt:
-                    print("Receiving interrupted by user")
 
 while True:
     readables, _, _ = select.select([sys.stdin, clientSocket], [], [])
@@ -248,6 +215,7 @@ while True:
                     print("User did not enter y/n, continuing...")
                     print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
                     continue
+            
             
             command = request.split[0]
             if command in server_commands:
