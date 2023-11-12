@@ -100,11 +100,15 @@ def write_user_log(username, client_ip, udp_port):
         file.write(f"{active_user_no}; {generate_formatted_time()}; {username}; {client_ip}; {udp_port}\n")
     active_user_no += 1
 
+#reset user log
+with open('messagelog.txt', 'w') as file:
+    pass
+
 message_counter = 1
 def write_message_log(username_to, timestamp, message):
     global active_user_no
     with open('messagelog.txt', 'a') as file:
-        file.write(f"{message_counter}; {timestamp}; {username_to}; {message}\n")
+        file.write(f"{message_counter}; {timestamp}; {username_to}; {message}")
     active_user_no += 1
 
 def update_user_log(username_to_remove):
@@ -157,7 +161,7 @@ class GroupChat():
     def log_message(self, timestamp, sender, message):
         log_line = f"{self.message_number}; {timestamp}; {sender}; {message}"
         with open(self.log_file_name, 'a') as log_file:
-            log_file.write(log_line + "\n")
+            log_file.write(log_line)
             
         self.message_number += 1
 
@@ -195,7 +199,7 @@ class ClientThread(Thread):
 
             # if the message from client is empty, the client would be off-line then set the client as offline (alive=Flase)
             if request == '\n' or request == '':
-                self.end_client_session(self.username)
+                self.end_client_session()
                 print("===== the user disconnected - ", clientAddress)
                 break
             
@@ -262,7 +266,7 @@ class ClientThread(Thread):
 
         update_user_log(self.username)
 
-        response = generate_response("logout", "200", "Logout successful.")
+        response = generate_response("logout", "200", "Logout successful. Goodbye!")
         self.clientSocket.send(response.encode())
 
     
@@ -390,7 +394,7 @@ class ClientThread(Thread):
 
         # check if the groupname already exists
         if chat_name in groups.keys():
-            self.clientSocket.send(generate_response("creategroup", "409", f"a group chat (Name: {chat_name}) already exist.".encode()))
+            self.clientSocket.send(generate_response("creategroup", "409", f"a group chat (Name: {chat_name}) already exist.").encode())
             return
         
         # if the groupname is invalid (contains letters otuside of a-z, A-Z and digit 0-9)

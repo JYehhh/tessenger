@@ -25,6 +25,7 @@ if len(sys.argv) != 4:
 serverHost = sys.argv[1]
 serverPort = int(sys.argv[2])
 udpPort = int(sys.argv[3])
+listening_on_udp = True
 serverAddress = (serverHost, serverPort)
 
 host_name = gethostname()
@@ -65,6 +66,9 @@ def close_connections():
             clientSocket.close()
         # Close the UDP connection
         if udpSocket:
+            global listening_on_udp
+            listening_on_udp = False
+            time.sleep(0.5)  # Give the thread time to exit gracefully
             udpSocket.close()
 
     except Exception as e:
@@ -135,25 +139,11 @@ def process_response(response):
         print(f"Critical Server Error: Bad Response Command {command}")
         sys.exit(1)
 
-################## PROCESS UDP RESPONSES ##################
-def listen_for_udp():
-    while True:
-        try:
-            data, addr = udpSocket.recvfrom(1024)  # buffer size is 1024 bytes
-            print(f"Received data from {addr}")
-            # Process the received data
-        except Exception as e:
-            print(f"Error in UDP communication: {e}")
-            break
-
-# Running the UDP listener in a separate thread
-threading.Thread(target=listen_for_udp, daemon=True).start()
-
 ################## USE SELECT TO WATCH INPUT ##################
 print("Welcome to Tessenger!")
 print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
 
-server_commands = ["/msgto", "/activeuser", "/creategroup", "/joingroup"," /groupmsg", "/logout"]
+server_commands = ["/msgto", "/activeuser", "/creategroup", "/joingroup", "/groupmsg", "/logout"]
 peer_commands = ["/p2pvideo"]
 
 def send_server_command(request):
@@ -166,14 +156,16 @@ def send_peer_command(request):
     if command == "/p2pvideo":
         if len(parts) != 3:
             print("Error: Invalid format. Usage: /p2pvideo username filename")
-            return
-
-        # Check if file exists
-        if not os.path.exists(filename):
-            print(f"Error: File '{filename}' does not exist.")
+            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
             return
 
         recipient, filename = parts[1], parts[2]
+        # Check if file exists
+        if not os.path.exists(filename):
+            print(f"Error: File '{filename}' does not exist.")
+            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
+            return
+
         # Check if recipient is active and get their UDP details
         response = send_and_get_response("/activeuser")
         _, _, _, active_users_data = split_response(response)
@@ -183,49 +175,61 @@ def send_peer_command(request):
             recipient_port = int(active_users_data["udp_ports"][recipient])
         else:
             print(f"Error: Recipient '{recipient}' is not active.")
+            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
             return
         
         send_file_over_udp(filename, recipient_ip, recipient_port)
+        print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
 
 def send_file_over_udp(filename, audience_ip, audience_udp_port):
     global client_username
-    global udpSocket # NOTE do i have to open a new socket to send?
+    sending_socket = socket(AF_INET, SOCK_DGRAM)
     
     initial_packet = f"initiate_transfer {filename} {client_username}"
-    udpSocket.sendto(initial_packet.encode(), (audience_ip, audience_udp_port))
+    sending_socket.sendto(initial_packet.encode(), (audience_ip, audience_udp_port))
     
     with open(filename, 'rb') as file:
         data = file.read(1024) # Read in chunks of 1024 bytes
         while data:
-            udpSocket.sendto(data, (audience_ip, audience_udp_port))
+            sending_socket.sendto(data, (audience_ip, audience_udp_port))
             time.sleep(0.00001)
             data = file.read(1024)
             
-    print(f"{filename} has been uploaded")
-    end_signal = b'EOF'
-    udpSocket.sendto(end_signal, (audience_ip, int(audience_udp_port)))
-    udpSocket.close()
+    print(f"{filename} has been uploaded.")
+    end_signal = 'EOF'
+    sending_socket.sendto(end_signal.encode(), (audience_ip, int(audience_udp_port)))
+    
+    sending_socket.close()
 
 
-def listening_for_video(socket):
-    while True:
-        data, _ = socket.recvfrom(1024)
-        packet = data.decode()
-        if packet.startswith("initiate_transfer"):
-            filename = packet.split()[1]
-            username = packet.split()[2]
-            with open(f"{username}_{filename}", 'wb') as f:
-                try:
-                    while True:
-                        video_data, _ = socket.recvfrom(1024)
-                        if video_data.endswith(b'EOF'):
-                            f.write(video_data[:-len(b'EOF')])
-                            print(f"Received {filename} from {username}")
-                            print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
-                            break
-                        f.write(video_data)
-                except KeyboardInterrupt:
-                    print("Receiving interrupted by user")
+def listening_for_udp(socket):
+    global listening_on_udp
+    while listening_on_udp:
+        try:
+            data, _ = socket.recvfrom(1024)
+            packet = data.decode()
+            if packet.startswith("initiate_transfer"):
+                filename = packet.split()[1]
+                username = packet.split()[2]
+                with open(f"{username}_{filename}", 'wb') as f:
+                    try:
+                        while True:
+                            video_data, _ = socket.recvfrom(1024)
+                            if video_data.endswith(b'EOF'):
+                                f.write(video_data[:-len(b'EOF')]) # NOTE Change this
+                                print(f"\nReceived {filename} from {username}")
+                                print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
+                                break
+                            f.write(video_data)
+                    except KeyboardInterrupt:
+                        print("Receiving interrupted by user")
+        except OSError as e:
+            # Handle socket closure
+            if not listening_on_udp:
+                break
+            print(f"Error in UDP communication: {e}")
+
+threading.Thread(target=listening_for_udp, args=(udpSocket,), daemon=True).start()
 
 while True:
     readables, _, _ = select.select([sys.stdin, clientSocket], [], [])
@@ -249,13 +253,14 @@ while True:
                     print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
                     continue
             
-            command = request.split[0]
+            command = request.split()[0]
             if command in server_commands:
                 send_server_command(request)
             elif command in peer_commands:
                 send_peer_command(request)
             else:
                 print("Error: Invalid command!")
+                print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
                 continue
             
         if readable is clientSocket:
