@@ -41,10 +41,10 @@ clientSocket.connect(serverAddress)
 ##################################################
 def send_request(message):
     clientSocket.sendall(message.encode())
-    # data = clientSocket.recv(1024)
-    # return data.decode()
+    data = clientSocket.recv(1024)
+    return data.decode()
 
-def process_response(response):
+def split_response(response):
     try:
         response_data = json.loads(response)
         command = response_data.get("command")
@@ -53,16 +53,20 @@ def process_response(response):
         data = response_data.get("data")
     except json.JSONDecodeError:
         print("Error: Received an invalid JSON response.")
-        
-    
-    parts = response.split(";")
-    if len(parts) < 3:
-        print("Critical Server Error: Bad Response Format")
-        sys.exit(1)
 
-    command, status_code, message = parts
     return command, status_code, message, data
 
+def close_connections():
+    try:
+        # Close the TCP connection
+        if clientSocket:
+            clientSocket.close()
+        # Close the UDP connection
+        if udpSocket:
+            udpSocket.close()
+
+    except Exception as e:
+        print(f"Error closing connections: {e}")
 ##################################################
 #                       MAIN                     #
 ##################################################
@@ -72,7 +76,7 @@ print("Please Login")
 while True:
     username = input("Username: ")
     response = send_request(f"[loginusername] {username}")
-    _, status_code, message, _ = process_response(response)
+    _, status_code, message, _ = split_response(response)
     
     if status_code == "200":
         break
@@ -85,7 +89,7 @@ while True:
     # if password == '\n' or password == '':
     #     continue # NOTE what about empty passwords
     response = send_request(f"[loginpassword] {password} {local_ip} {udpPort}")
-    _, status_code, message, _ = process_response(response)
+    _, status_code, message, _ = split_response(response)
     
     if status_code == "200": # SUCCESS
         break
@@ -101,11 +105,11 @@ while True:
 
 ################## PROCESS RESPONSES ##################
 def process_response(response):
-    command, _, message, _ = process_response(response)
+    command, _, message, _ = split_response(response)
     if command == "incomingmessage":
-        print(f"{message}")
+        print(f"\n{message}", end='')
     elif command == "incominggroupmsg":
-        print(f"{message}")
+        print(f"\n{message}", end='')
     elif command == "msgto":
         print(f"{message}")
     elif command == "activeuser":
@@ -118,6 +122,8 @@ def process_response(response):
         print(f"{message}")
     elif command == "logout":
         print(f"{message}")
+        close_connections()
+        sys.exit(1)
     elif command == "unknown":
         print(f"{message}")
     else:
@@ -157,6 +163,7 @@ while True:
                     continue
                 elif cont == 'n':
                     clientSocket.sendall(request.encode())
+                    close_connections()
                     sys.exit(0)
                 else:
                     print("User did not enter y/n, continuing...")
@@ -169,6 +176,8 @@ while True:
             response = clientSocket.recv(1024).decode()
             process_response(response)
             print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
+
+
 
 # create UDP receiving socket in main
 # create thread that runs a function
