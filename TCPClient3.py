@@ -123,7 +123,7 @@ def process_response(response):
     elif command == "logout":
         print(f"{message}")
         close_connections()
-        sys.exit(1)
+        sys.exit(0)
     elif command == "unknown":
         print(f"{message}")
     else:

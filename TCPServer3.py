@@ -256,7 +256,7 @@ class ClientThread(Thread):
         active_users.pop(self.username, None)
         
         global threads
-        active_users.pop(self.username, None)
+        threads.pop(self.username, None)
 
         update_user_log(self.username)
 
