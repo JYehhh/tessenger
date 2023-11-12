@@ -11,6 +11,7 @@ from socket import *
 from threading import Thread
 import sys, select
 import time
+import json
 
 ##################################################
 #                 Helper Functions               #
@@ -24,7 +25,13 @@ def generate_response(command, statusCode, clientMessage = "", data={}):
         # Not Found (404): User or resource (e.g., group chat) not found.
         # Conflict (409): For conflicts, like trying to create an already existing group chat.
         # Internal Server Error (500): General server-side error.
-    return f"{command};{statusCode};{clientMessage}"
+    response = {
+        "command": command,
+        "statusCode": statusCode,
+        "clientMessage": clientMessage,
+        "data": data
+    }
+    return json.dumps(response)
 
 def generate_formatted_time():
     return f"{time.strftime('%d %b %Y %H:%M:%S', time.localtime())}"
@@ -306,28 +313,27 @@ class ClientThread(Thread):
     
     def process_activeuser(self):
         #assuming log file is kept correctly
-        active_users = []
-        with open("userlog.txt", "r") as file:
-            active_users = file.readlines()
-        
-        # NOTE If we change sending messages to json - we can structure the other data nicely instead of having to do post processing later (i.e. splitting in )
+        client_ips = {}
+        udp_ports = {}
         messages = []
-        for line in active_users:
-            parts = line.split('; ')
-            timestamp = parts[1]
-            user = parts[2]
-            ip = parts[3]
-            port = parts[4]
-        
-            if user != self.username:
-                messages.append(f"{user}, active since {timestamp}.; {ip}; {port}") # NOTE need to fix this - and change it to JSON???
+        with open("userlog.txt", "r") as file:
+            for line in file:
+                parts = line.strip().split('; ')
+                if len(parts) < 5:  # Ensuring that each line has enough parts
+                    continue
+                user, timestamp, ip, port = parts[2], parts[1], parts[3], parts[4].strip()
 
-            
+                if user != self.username:
+                    messages.append(f"{user}, active since {timestamp}. Client IP is {ip} with UDP recieving port: {port}")
+                    client_ips[user] = ip
+                    udp_ports[user] = port
+        
         if len(messages) == 0:
             self.clientSocket.send(generate_response("activeuser", "200", "no other active user"))
         else:
-            self.clientSocket.send(generate_response("activeuser", "200", '\n'.join(messages)).encode())
-    
+            data = {"client_ips": client_ips, "udp_ports": udp_ports}
+            self.clientSocket.send(generate_response("activeuser", "200", '\n'.join(messages), data).encode())
+        
     def process_creategroup(self, request):
         # NOTE: OVERALL, check if all the status codes are correct
         parts = request.split()

@@ -9,6 +9,7 @@ from socket import *
 import threading
 import sys
 import select
+import json
 
 
 ##################################################
@@ -43,14 +44,24 @@ def send_request(message):
     # data = clientSocket.recv(1024)
     # return data.decode()
 
-def split_response(response):
+def process_response(response):
+    try:
+        response_data = json.loads(response)
+        command = response_data.get("command")
+        status_code = response_data.get("statusCode")
+        message = response_data.get("clientMessage")
+        data = response_data.get("data")
+    except json.JSONDecodeError:
+        print("Error: Received an invalid JSON response.")
+        
+    
     parts = response.split(";")
     if len(parts) < 3:
         print("Critical Server Error: Bad Response Format")
         sys.exit(1)
 
     command, status_code, message = parts
-    return command, status_code, message
+    return command, status_code, message, data
 
 ##################################################
 #                       MAIN                     #
@@ -61,7 +72,7 @@ print("Please Login")
 while True:
     username = input("Username: ")
     response = send_request(f"[loginusername] {username}")
-    _, status_code, message = split_response(response)
+    _, status_code, message, _ = process_response(response)
     
     if status_code == "200":
         break
@@ -74,7 +85,7 @@ while True:
     # if password == '\n' or password == '':
     #     continue # NOTE what about empty passwords
     response = send_request(f"[loginpassword] {password} {local_ip} {udpPort}")
-    _, status_code, message = split_response(response)
+    _, status_code, message, _ = process_response(response)
     
     if status_code == "200": # SUCCESS
         break
@@ -90,7 +101,7 @@ while True:
 
 ################## PROCESS RESPONSES ##################
 def process_response(response):
-    command, status_code, message = split_response(response)
+    command, _, message, _ = process_response(response)
     if command == "incomingmessage":
         print(f"{message}")
     elif command == "incominggroupmsg":
@@ -151,9 +162,9 @@ while True:
                     print("User did not enter y/n, continuing...")
                     print("Enter one of the following commands (/msgto, /activeuser, /creategroup, /joingroup, /groupmsg, /logout): ", end = '', flush=True)
                     continue
-
-            
+                
             clientSocket.sendall(request.encode())
+            
         if readable is clientSocket:
             response = clientSocket.recv(1024).decode()
             process_response(response)
@@ -164,3 +175,4 @@ while True:
 # constant listening for bytes sent over udp - via socket library - lab code.
 
 # implement one funciton in server to get credentials and UDP port number of the other client - contacts server
+
