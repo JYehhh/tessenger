@@ -95,8 +95,8 @@ while True:
 ################## COLLECT PASSWORD ##################
 while True:
     password = input("Password: ")
-    # if password == '\n' or password == '':
-    #     continue # NOTE what about empty passwords
+    if password.strip() == '': # assumes a password can't be all whitespaces
+        continue
     response = send_and_get_response(f"[loginpassword] {password} {local_ip} {udpPort}")
     _, status_code, message, _ = split_response(response)
     
@@ -238,7 +238,7 @@ while True:
         if readable is sys.stdin:
             request = sys.stdin.readline()
             
-            if request == '' or request == '\n': # NOTE might have to add a check if it's all whitepsace???
+            if request.strip() == '':
                 cont = input("Input is empty, do you want to continue (y/n)? ")
                 if cont == 'y':
                     # don't send the packet and continue

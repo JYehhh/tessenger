@@ -94,7 +94,6 @@ with open('userlog.txt', 'w') as file:
 
 active_user_no = 1
 def write_user_log(username, client_ip, udp_port):
-    # NOTE does this need to be persistent? or non-persistent?
     global active_user_no
     with open('userlog.txt', 'a') as file:
         file.write(f"{active_user_no}; {generate_formatted_time()}; {username}; {client_ip}; {udp_port}\n")
@@ -152,8 +151,8 @@ class GroupChat():
         # send to everyone but the sender
         global threads
         global active_users
-        for username, joined in self.users_joined.items():
-            if joined and username in active_users and username != sender: # if user is joined, and user is active # NOTE check this shit im too tired to know what might be wrong
+        for username, joined in self.users_joined.items(): # for every user invited
+            if joined and username in active_users and username != sender: # if user is joined, and user is active, and is not equal to sender
                 recipient_thread = threads.get(username)
                 response = generate_response("incominggroupmsg", "200", f"{sender} issued a message in group chat {self.name}:\n{timestamp}; {sender}; {message}").encode()
                 recipient_thread.clientSocket.send(response)# send the message to the recipient
@@ -213,19 +212,7 @@ class ClientThread(Thread):
                 
             elif requestCommand == '[loginpassword]':
                 print("[recv] New password attempt for user: " + self.username)
-                parts = request.split()
-                
-                if len(request.split()) != 4:
-                    print(f"Bad password request {request}")
-                    generate_response("loginpassword", "500", "Server Error: Bad password request")
-                    continue
-                
-                password = parts[1]
-                client_ip = parts[2]
-                udp_port = parts[3]
-                
-                self.process_password(password, client_ip, udp_port)      
-                # NOTE, push this all into process_password 
+                self.process_password(request)
                          
             elif requestCommand == '/msgto':
                 print("[recv] New message send attempt by user: " + self.username)
@@ -293,7 +280,18 @@ class ClientThread(Thread):
         self.clientSocket.send(response.encode())
 
 
-    def process_password(self, password, client_ip, udp_port):
+    def process_password(self, request):
+        parts = request.split()
+        
+        if len(request.split()) != 4:
+            print(f"Bad password request {request}")
+            generate_response("loginpassword", "500", "Server Error: Malformed password request")
+            return
+        
+        password = parts[1]
+        client_ip = parts[2]
+        udp_port = parts[3]
+        
         if self.is_user_blocked(): # if the user is blocked
             self.clientAlive = False
             response = generate_response("loginpassword", "403", "Your account is blocked due to multiple login failures. Please try again later")
@@ -332,11 +330,8 @@ class ClientThread(Thread):
         username_to = parts[1]
         content = parts[2]
         
-        # NOTE check if the content is all whitespace - will implement later
-        
         # check if the recipient exists
-        # NOTE does the recipient need to be active? - probably
-        if username_to not in threads:
+        if username_to not in threads.keys:
             self.clientSocket.send(generate_response("msgto", "404", "Recipient Not Found!").encode())
             return
     
@@ -408,7 +403,7 @@ class ClientThread(Thread):
         
         # Send response for success
         recipients_with_owner = [owner] + recipients
-        self.clientSocket.send(generate_response("creategroup", "200", f"Group chat room has been created, room name: {chat_name}, users in this room: {' '.join(recipients_with_owner)}").encode()) # NOTE: check if the owner should be in the room
+        self.clientSocket.send(generate_response("creategroup", "200", f"Group chat room has been created, room name: {chat_name}, users in this room: {' '.join(recipients_with_owner)}").encode())
     
     def process_joingroup(self, request):
         # Split the request to get the group name
