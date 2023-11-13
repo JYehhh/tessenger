@@ -13,19 +13,31 @@ import sys, select
 import time
 import json
 
+
+##################################################
+#                 Helper Functions               #
+##################################################
+# Socket and Server Constants:
+SOCKET_BUFFER_SIZE = 1024
+
+# File Paths:
+CREDENTIALS_FILE = 'credentials.txt'
+USER_LOG_FILE = 'userlog.txt'
+MESSAGE_LOG_FILE = 'messagelog.txt'
+
+# Status Code Constants:
+SUCCESS = 200
+CLIENT_ERROR = 400
+UNAUTHORIZED = 401
+FORBIDDEN = 403
+NOT_FOUND = 404
+CONFLICT = 409
+INTERNAL_SERVER_ERROR = 500
+
 ##################################################
 #                 Helper Functions               #
 ##################################################
 def generate_response(command, statusCode, clientMessage = "", data={}):
-    # Status Codes
-        # Success (200): Indicates successful execution of a command.
-        # Client Error (400): General client-side error, such as malformed request or missing arguments.
-        # Unauthorized (401): For invalid login attempts or unauthorized access attempts.
-        # Forbidden (403): For blocked users or access to unauthorized commands.
-        # Not Found (404): User or resource (e.g., group chat) not found.
-        # Conflict (409): For conflicts, like trying to create an already existing group chat.
-        # Internal Server Error (500): General server-side error.
-    
     response = {
         "command": command,
         "statusCode": statusCode,
@@ -43,9 +55,9 @@ def generate_formatted_time():
 if len(sys.argv) != 3:
     print("\n===== Error usage, python3 TCPServer3.py SERVER_PORT ATTEMPTS_BEFORE_LOCK ======\n")
     exit(0)
-serverHost = "127.0.0.1"
-serverPort = int(sys.argv[1])
-serverAddress = (serverHost, serverPort)
+server_host = "127.0.0.1"
+server_port = int(sys.argv[1])
+server_address = (server_host, server_port)
 
 try:
     attempts_cap = int(sys.argv[2])
@@ -58,8 +70,8 @@ if not 1 <= attempts_cap <= 5:
     sys.exit(1)
 
 # define socket for the server side and bind address
-serverSocket = socket(AF_INET, SOCK_STREAM)
-serverSocket.bind(serverAddress)
+server_socket = socket(AF_INET, SOCK_STREAM)
+server_socket.bind(server_address)
 
 ##################################################
 #               Setup Datastructures             #
@@ -69,7 +81,7 @@ serverSocket.bind(serverAddress)
 credentials = {}
 failed_attempts = {}
 blocked_users = {}
-with open('credentials.txt') as file:
+with open(CREDENTIALS_FILE) as file:
     for l in file.readlines():
         username = l.split()[0]
         password = l.split()[1]
@@ -95,18 +107,18 @@ with open('userlog.txt', 'w') as file:
 active_user_no = 1
 def write_user_log(username, client_ip, udp_port):
     global active_user_no
-    with open('userlog.txt', 'a') as file:
+    with open(USER_LOG_FILE, 'a') as file:
         file.write(f"{active_user_no}; {generate_formatted_time()}; {username}; {client_ip}; {udp_port}\n")
     active_user_no += 1
 
 #reset user log
-with open('messagelog.txt', 'w') as file:
+with open(MESSAGE_LOG_FILE, 'w') as file:
     pass
 
 message_counter = 1
 def write_message_log(username_to, timestamp, message):
     global active_user_no
-    with open('messagelog.txt', 'a') as file:
+    with open(MESSAGE_LOG_FILE, 'a') as file:
         file.write(f"{message_counter}; {timestamp}; {username_to}; {message}")
     active_user_no += 1
 
@@ -115,11 +127,11 @@ def update_user_log(username_to_remove):
     lines = []
 
     # Read the current user log file
-    with open('userlog.txt', 'r') as file:
+    with open(USER_LOG_FILE, 'r') as file:
         lines = file.readlines()
 
     # Rewrite the file without the removed user and adjust sequence numbers
-    with open('userlog.txt', 'w') as file:
+    with open(USER_LOG_FILE, 'w') as file:
         new_user_no = 1
         for line in lines:
             parts = line.strip().split('; ')
@@ -154,8 +166,8 @@ class GroupChat():
         for username, joined in self.users_joined.items(): # for every user invited
             if joined and username in active_users and username != sender: # if user is joined, and user is active, and is not equal to sender
                 recipient_thread = threads.get(username)
-                response = generate_response("incominggroupmsg", "200", f"{sender} issued a message in group chat {self.name}:\n{timestamp}; {sender}; {message}").encode()
-                recipient_thread.clientSocket.send(response)# send the message to the recipient
+                response = generate_response("incominggroupmsg", SUCCESS, f"{sender} issued a message in group chat {self.name}:\n{timestamp}; {sender}; {message}").encode()
+                recipient_thread.client_socket.send(response)# send the message to the recipient
     
     def log_message(self, timestamp, sender, message):
         log_line = f"{self.message_number}; {timestamp}; {sender}; {message}"
@@ -177,29 +189,29 @@ class GroupChat():
 #                  Thread Class                  #
 ##################################################
 class ClientThread(Thread):
-    def __init__(self, clientAddress, clientSocket):
+    def __init__(self, client_address, client_socket):
         Thread.__init__(self)
-        self.clientAddress = clientAddress
-        self.clientSocket = clientSocket
-        self.clientAlive = False
+        self.client_address = client_address
+        self.client_socket = client_socket
+        self.client_alive = False
         self.username = None
         self.password = None
         
-        print("===== New connection created for: ", clientAddress)
-        self.clientAlive = True
+        print("===== New connection created for: ", client_address)
+        self.client_alive = True
         
     def run(self):
         request = ''
         
-        while self.clientAlive:
+        while self.client_alive:
             # use recv() to receive message from the client
-            data = self.clientSocket.recv(1024)
+            data = self.client_socket.recv(SOCKET_BUFFER_SIZE)
             request = data.decode()
 
             # if the message from client is empty, the client would be off-line then set the client as offline (alive=Flase)
             if request == '\n' or request == '':
                 self.end_client_session()
-                print("===== the user disconnected - ", clientAddress)
+                print("===== the user disconnected - ", client_address)
                 break
             
             # get the type of message
@@ -243,7 +255,7 @@ class ClientThread(Thread):
     
     
     def end_client_session(self):
-        self.clientAlive = False
+        self.client_alive = False
 
         global active_users
         active_users.pop(self.username, None)
@@ -253,8 +265,8 @@ class ClientThread(Thread):
 
         update_user_log(self.username)
 
-        response = generate_response("logout", "200", "Logout successful. Goodbye!")
-        self.clientSocket.send(response.encode())
+        response = generate_response("logout", SUCCESS, "Logout successful. Goodbye!")
+        self.client_socket.send(response.encode())
 
     
     #################### CUSTOM API's ####################
@@ -272,12 +284,12 @@ class ClientThread(Thread):
         if username in credentials.keys():
             self.username = username
             self.password = credentials.get(username)
-            response = generate_response("loginusername", "200", "")
+            response = generate_response("loginusername", SUCCESS, "")
         else:
-            response = generate_response("loginusername", "404", "Invalid Username, please try again.") 
+            response = generate_response("loginusername", NOT_FOUND, "Invalid Username, please try again.") 
         
         print('[send] ' + response);
-        self.clientSocket.send(response.encode())
+        self.client_socket.send(response.encode())
 
 
     def process_password(self, request):
@@ -285,7 +297,7 @@ class ClientThread(Thread):
         
         if len(request.split()) != 4:
             print(f"Bad password request {request}")
-            generate_response("loginpassword", "500", "Server Error: Malformed password request")
+            generate_response("loginpassword", INTERNAL_SERVER_ERROR, "Server Error: Malformed password request")
             return
         
         password = parts[1]
@@ -293,11 +305,11 @@ class ClientThread(Thread):
         udp_port = parts[3]
         
         if self.is_user_blocked(): # if the user is blocked
-            self.clientAlive = False
-            response = generate_response("loginpassword", "403", "Your account is blocked due to multiple login failures. Please try again later")
+            self.client_alive = False
+            response = generate_response("loginpassword", FORBIDDEN, "Your account is blocked due to multiple login failures. Please try again later")
             
         elif password == self.password: # if the password is correct
-            response = generate_response("loginpassword", "200", "") 
+            response = generate_response("loginpassword", SUCCESS, "") 
             write_user_log(self.username, client_ip, udp_port)
             failed_attempts[self.username] = 0
             global threads
@@ -305,24 +317,24 @@ class ClientThread(Thread):
             active_users[self.username] = generate_formatted_time()
             
         else: # if the password is incorrect
-            response = generate_response("loginpassword", "401", "Invalid Password.")
+            response = generate_response("loginpassword", UNAUTHORIZED, "Invalid Password.")
             failed_attempts[self.username] += 1
             
             if failed_attempts[self.username] == attempts_cap:
-                self.clientAlive = False
+                self.client_alive = False
                 failed_attempts[self.username] = 0
                 blocked_users[self.username] = time.time()
-                response = generate_response("loginpassword", "403", "Invalid Password. Your account has been blocked. Please try again later")
+                response = generate_response("loginpassword", FORBIDDEN, "Invalid Password. Your account has been blocked. Please try again later")
                 
         print('[send] ' + response);
-        self.clientSocket.send(response.encode())
+        self.client_socket.send(response.encode())
 
     def process_msgto(self, request):
         parts = request.split(' ', 2)
         
         # check if there are enough arguments
         if len(parts) < 3:
-            self.clientSocket.send(generate_response("msgto", "400", "Invalid command format. Usage: /msgto USERNAME MESSAGE_CONTENT").encode())
+            self.client_socket.send(generate_response("msgto", CLIENT_ERROR, "Error: Invalid command format. Usage: /msgto USERNAME MESSAGE_CONTENT").encode())
             return
         
         # collect arguments 
@@ -332,16 +344,16 @@ class ClientThread(Thread):
         
         # check if the recipient exists
         if username_to not in threads.keys:
-            self.clientSocket.send(generate_response("msgto", "404", "Recipient Not Found!").encode())
+            self.client_socket.send(generate_response("msgto", NOT_FOUND, "Error: Recipient Not Found!").encode())
             return
     
         # find the client thread, send a message to that client
         timestamp = generate_formatted_time()
         recipient_thread = threads[username_to]
-        recipient_thread.clientSocket.send(generate_response("incomingmessage", "200", f"{timestamp}, {username_from}: {content}").encode()) # send the message to the recipient
+        recipient_thread.client_socket.send(generate_response("incomingmessage", SUCCESS, f"{timestamp}, {username_from}: {content}").encode()) # send the message to the recipient
         write_message_log(username_to, timestamp, content)
     
-        self.clientSocket.send(generate_response("msgto", "200", f"message sent at {generate_formatted_time()}.").encode())
+        self.client_socket.send(generate_response("msgto", SUCCESS, f"message sent at {generate_formatted_time()}.").encode())
     
     def process_activeuser(self):
         #assuming log file is kept correctly
@@ -361,10 +373,10 @@ class ClientThread(Thread):
                     udp_ports[user] = port
         
         if len(messages) == 0:
-            self.clientSocket.send(generate_response("activeuser", "200", "no other active user").encode())
+            self.client_socket.send(generate_response("activeuser", SUCCESS, "no other active user").encode())
         else:
             data = {"client_ips": client_ips, "udp_ports": udp_ports}
-            self.clientSocket.send(generate_response("activeuser", "200", '\n'.join(messages), data).encode())
+            self.client_socket.send(generate_response("activeuser", SUCCESS, '\n'.join(messages), data).encode())
         
     def process_creategroup(self, request):
         # NOTE: OVERALL, check if all the status codes are correct
@@ -373,7 +385,7 @@ class ClientThread(Thread):
         parts = request.split()
         
         if len(parts) < 3:
-            self.clientSocket.send(generate_response("creategroup", "400", "Error: Not enough arguments for /creategroup.").encode())
+            self.client_socket.send(generate_response("creategroup", CLIENT_ERROR, "Error: Not enough arguments for /creategroup.").encode())
             return
         
         chat_name = parts[1]
@@ -384,17 +396,17 @@ class ClientThread(Thread):
         global active_users
         for r in recipients:
             if r not in active_users.keys():
-                self.clientSocket.send(generate_response("creategroup", "404", f"Error: {r} is offline, or an invalid username.").encode())
+                self.client_socket.send(generate_response("creategroup", NOT_FOUND, f"Error: {r} is offline, or an invalid username.").encode())
                 return
 
         # check if the groupname already exists
         if chat_name in groups.keys():
-            self.clientSocket.send(generate_response("creategroup", "409", f"a group chat (Name: {chat_name}) already exist.").encode())
+            self.client_socket.send(generate_response("creategroup", CONFLICT, f"Error: a group chat (Name: {chat_name}) already exist.").encode())
             return
         
         # if the groupname is invalid (contains letters otuside of a-z, A-Z and digit 0-9)
         if not chat_name.isalnum():
-            self.clientSocket.send(generate_response("creategroup", "400", "Error: Group name is invalid. Use only letters and digits.").encode())
+            self.client_socket.send(generate_response("creategroup", CLIENT_ERROR, "Error: Group name is invalid. Use only letters and digits.").encode())
             return
         
         # initialise a group object
@@ -403,7 +415,7 @@ class ClientThread(Thread):
         
         # Send response for success
         recipients_with_owner = [owner] + recipients
-        self.clientSocket.send(generate_response("creategroup", "200", f"Group chat room has been created, room name: {chat_name}, users in this room: {' '.join(recipients_with_owner)}").encode())
+        self.client_socket.send(generate_response("creategroup", SUCCESS, f"Group chat room has been created, room name: {chat_name}, users in this room: {' '.join(recipients_with_owner)}").encode())
     
     def process_joingroup(self, request):
         # Split the request to get the group name
@@ -411,7 +423,7 @@ class ClientThread(Thread):
         
         # Check if the request is correctly formatted
         if len(parts) != 2:
-            self.clientSocket.send(generate_response("joingroup", "400", "Error: Invalid command format. Usage: /joingroup groupname").encode())
+            self.client_socket.send(generate_response("joingroup", CLIENT_ERROR, "Error: Invalid command format. Usage: /joingroup groupname").encode())
             return
 
         group_name = parts[1]
@@ -420,30 +432,30 @@ class ClientThread(Thread):
         # Check if the group name exists
         global groups
         if group_name not in groups:
-            self.clientSocket.send(generate_response("joingroup", "404", "Error: Group chat does not exist.").encode())
+            self.client_socket.send(generate_response("joingroup", NOT_FOUND, "Error: Group chat does not exist.").encode())
             return
 
         group = groups[group_name]
 
         # Check if the user is invited to the group
         if username not in group.users_joined:
-            self.clientSocket.send(generate_response("joingroup", "403", "Error: You are not invited to this group chat.").encode())
+            self.client_socket.send(generate_response("joingroup", UNAUTHORIZED, "Error: You are not invited to this group chat.").encode())
             return
 
         # Check if the user has already joined the group
         if group.has_user_joined(username):
-            self.clientSocket.send(generate_response("joingroup", "409", "Error: You are already in this group chat.").encode())
+            self.client_socket.send(generate_response("joingroup", CONFLICT, "Error: You are already in this group chat.").encode())
             return
 
         # Add the user to the group and send appropriate message to client
         group.accept_invite(username)
-        self.clientSocket.send(generate_response("joingroup", "200", f"You have successfully joined the group chat '{group_name}'.").encode())
+        self.client_socket.send(generate_response("joingroup", SUCCESS, f"You have successfully joined the group chat '{group_name}'.").encode())
 
     def process_groupmsg(self, request):
         parts = request.split(' ', 2)
         
         if len(parts) < 3:
-            self.clientSocket.send(generate_response("groupmsg", "400", "Error: Invalid command format. Usage: /groupmsg groupname message").encode())
+            self.client_socket.send(generate_response("groupmsg", CLIENT_ERROR, "Error: Invalid command format. Usage: /groupmsg groupname message").encode())
             return
         
         group_name = parts[1]
@@ -452,19 +464,19 @@ class ClientThread(Thread):
         # check if group chat exists - else reply "Error: The group chat [name] does not exist"
         global groups
         if group_name not in groups:
-            self.clientSocket.send(generate_response("groupmsg", "404", f"Error: The group chat {group_name} does not exist.").encode())
+            self.client_socket.send(generate_response("groupmsg", NOT_FOUND, f"Error: The group chat {group_name} does not exist.").encode())
             return
         
         group = groups[group_name]
         
         # check if the user is invited - else reply "Error: You are not in this group chat."
         if not group.is_user_invited(self.username):
-            self.clientSocket.send(generate_response("groupmsg", "403", "Error: You are not in this group chat.").encode())
+            self.client_socket.send(generate_response("groupmsg", UNAUTHORIZED, "Error: You are not in this group chat.").encode())
             return
 
         # check if user has joined - else reply "Error: you are invited but have not yet joined the group chat."
         if not group.has_user_joined(self.username):
-            self.clientSocket.send(generate_response("groupmsg", "403", "Error: You are invited but have not yet joined the group chat.").encode())
+            self.client_socket.send(generate_response("groupmsg", UNAUTHORIZED, "Error: Please join the group before sending messages.").encode())
             return
         
         timestamp = generate_formatted_time()
@@ -475,13 +487,13 @@ class ClientThread(Thread):
                 if user == self.username or user not in threads.keys(): # skip if self, or if they are not online
                     continue
                 recipient_thread = threads[user]
-                recipient_thread.clientSocket.send(generate_response("incominggroupmsg", "200", f"{timestamp}, {group_name}, {self.username}: {message}").encode()) # send the message to the recipient
+                recipient_thread.client_socket.send(generate_response("incominggroupmsg", SUCCESS, f"{timestamp}, {group_name}, {self.username}: {message}").encode()) # send the message to the recipient
         
         group.log_message(timestamp, self.username, message)
-        self.clientSocket.send(generate_response("groupmsg", "200", "Group chat message sent.").encode())
+        self.client_socket.send(generate_response("groupmsg", SUCCESS, "Group chat message sent.").encode())
     
     def process_invalid_command(self):
-        self.clientSocket.send(generate_response("unknown", "404", "Error: Invalid command!").encode())
+        self.client_socket.send(generate_response("unknown", NOT_FOUND, "Error: Invalid command!").encode())
     
 print("\n===== Server is running =====")
 print("===== Waiting for connection request from clients...=====")
@@ -489,7 +501,7 @@ print("===== Waiting for connection request from clients...=====")
 
 while True:
     #implement multithreding
-    serverSocket.listen()
-    clientSockt, clientAddress = serverSocket.accept()
-    clientThread = ClientThread(clientAddress, clientSockt)
+    server_socket.listen()
+    clientSockt, client_address = server_socket.accept()
+    clientThread = ClientThread(client_address, clientSockt)
     clientThread.start()
