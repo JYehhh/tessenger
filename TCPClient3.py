@@ -20,10 +20,6 @@ import time
 # Socket Configuration Constants:
 BUFFER_SIZE = 1024
 
-# Command Lists:
-SERVER_COMMANDS = ["/msgto", "/activeuser", "/creategroup", "/joingroup", "/groupmsg", "/logout"]
-PEER_COMMANDS = ["/p2pvideo"]
-
 # File Transfer Constants:
 FILE_CHUNK_SIZE = 1024
 TRANSFER_INITIATION_PREFIX = "initiate_transfer"
