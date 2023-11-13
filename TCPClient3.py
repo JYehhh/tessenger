@@ -1,9 +1,9 @@
 """
     Python 3
-    Usage: python3 TCPClient3.py localhost 12000
+    Usage: python3 TCPClient3.py SERVER_IP SERVER_PORT UDP_PORT
     coding: utf-8
     
-    Author: Wei Song (Tutor for COMP3331/9331)
+    Author: Jerry Yeh (z5362570) - Adapted from Wei Song (Tutor for COMP3331/9331)
 """
 from socket import *
 import threading
@@ -110,11 +110,12 @@ def close_connections():
 
     except Exception as e:
         print(f"Error closing connections: {e}")
+        
 ##################################################
 #                       MAIN                     #
 ##################################################
 
-################## COLLECT USERNAME ##################
+################## 1. COLLECT USERNAME ##################
 client_username = ""
 print(LOGIN_PROMPT)
 
@@ -129,7 +130,7 @@ while True:
     elif status_code == NOT_FOUND:
         print(f"{message}")
 
-################## COLLECT PASSWORD ##################
+################## 2. COLLECT PASSWORD ##################
 while True:
     password = input("Password: ")
     if password.strip() == '': # assumes a password can't be all whitespaces
@@ -149,7 +150,7 @@ while True:
         print(f"Critical Server Error: Bad Status Code {status_code}")
         sys.exit(1)
 
-################## PROCESS RESPONSES ##################
+################## 3.1 FUNCTION TO PROCESS RESPONSES ##################
 def process_response(response):
     command, _, message, _ = split_response(response)
     if command == "incomingmessage":
@@ -176,10 +177,7 @@ def process_response(response):
         print(f"Critical Server Error: Bad Response Command {command}")
         sys.exit(1)
 
-################## USE SELECT TO WATCH INPUT ##################
-print(WELCOME_MESSAGE)
-print(COMMAND_PROMPT, end = '', flush=True)
-
+################## 3.2 FUNCTIONS TO SEND COMMANDS ##################
 server_commands = ["/msgto", "/activeuser", "/creategroup", "/joingroup", "/groupmsg", "/logout"]
 peer_commands = ["/p2pvideo"]
 
@@ -218,6 +216,7 @@ def send_peer_command(request):
         send_file_over_udp(filename, recipient_ip, recipient_port)
         print(COMMAND_PROMPT, end = '', flush=True)
 
+################## 4. SETTING UP UDP LISTENING THREAD ##################
 def send_file_over_udp(filename, audience_ip, audience_udp_port):
     global client_username
     sending_socket = socket(AF_INET, SOCK_DGRAM)
@@ -237,7 +236,6 @@ def send_file_over_udp(filename, audience_ip, audience_udp_port):
     
     sending_socket.close()
 
-
 def listening_for_udp(socket):
     global listening_on_udp
     while listening_on_udp:
@@ -247,25 +245,29 @@ def listening_for_udp(socket):
             if packet.startswith("initiate_transfer"):
                 filename = packet.split()[1]
                 username = packet.split()[2]
-                with open(f"{username}_{filename}", 'wb') as f:
+                with open(f"{username}_{filename}", 'wb') as file:
                     try:
                         while True:
                             video_data, _ = socket.recvfrom(FILE_CHUNK_SIZE)
                             if video_data.endswith(EOF_SIGNAL.encode()):
-                                f.write(video_data[:-len(EOF_SIGNAL.encode())]) # NOTE Change this
+                                file.write(video_data[:-len(EOF_SIGNAL.encode())]) # NOTE Change this
                                 print(f"\nReceived {filename} from {username}")
                                 print(COMMAND_PROMPT, end = '', flush=True)
                                 break
-                            f.write(video_data)
+                            file.write(video_data)
                     except KeyboardInterrupt:
                         print("Receiving interrupted by user")
         except OSError as e:
-            # Handle socket closure
             if not listening_on_udp:
                 break
             print(f"Error in UDP communication: {e}")
 
 threading.Thread(target=listening_for_udp, args=(udp_socket,), daemon=True).start()
+
+################## 5. START LISTENING IN TCP AND STD INPUT ##################
+
+print(WELCOME_MESSAGE)
+print(COMMAND_PROMPT, end = '', flush=True)
 
 while True:
     readables, _, _ = select.select([sys.stdin, client_socket], [], [])
@@ -303,5 +305,3 @@ while True:
             response = client_socket.recv(BUFFER_SIZE).decode()
             process_response(response)
             print(COMMAND_PROMPT, end = '', flush=True)
-
-
